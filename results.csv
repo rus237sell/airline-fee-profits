@@ -1,0 +1,6 @@
+year,airlines_reporting,operating_revenue_$B,operating_profit_$B,net_income_$B,baggage_fees_$B,change_fees_$B,reported_fees_total_$B,fees_share_of_revenue_%,fees_share_of_op_profit_%,op_profit_ex_fees_$B,op_margin_%,op_margin_ex_fees_%,note
+2019,21,196.2,20.8,14.8,5.8,2.8,8.6,4.4,41.3,12.2,10.6,6.2,counterfactual holds expenses flat: upper bound on fee contribution
+2020,23,77.3,-46.5,-35.0,2.8,0.9,3.7,4.8,,-50.2,-60.2,-64.9,pandemic year: fees did not offset the operating loss
+2023,26,236.3,13.2,7.8,7.1,1.1,8.2,3.5,62.1,5.0,5.6,2.1,counterfactual holds expenses flat: upper bound on fee contribution
+2024,25,247.2,13.5,6.7,7.3,1.0,8.3,3.4,61.5,5.2,5.5,2.1,counterfactual holds expenses flat: upper bound on fee contribution
+2025,25,252.6,11.4,6.0,7.4,1.1,8.5,3.4,74.6,2.9,4.5,1.1,counterfactual holds expenses flat: upper bound on fee contribution
