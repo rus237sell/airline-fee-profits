@@ -12,6 +12,12 @@ counterfactual in the script.
 - 2020: BTS 30-21 (May 3, 2021). Revenue $77.3B, operating loss $46.5B,
   net loss $35.0B, baggage fees $2.8B, change fees $0.9B ($898M), 23 airlines.
   https://www.bts.gov/newsroom/us-airlines-2020-net-profit-down-35-billion-2019
+- 2021: BTS 20-22 (May 2, 2022). Revenue $130.0B, operating loss $17.3B,
+  net loss $2.8B, baggage fees $5.3B, change fees $0.7B ($698M), 25 airlines.
+  https://www.bts.gov/newsroom/2021-annual-and-4th-quarter-us-airline-financial-data
+- 2022: BTS 21-23 (May 1, 2023). Revenue $211.2B, operating profit $7.9B,
+  net $1.6B, baggage fees $6.8B, change fees $1.0B, 25 airlines.
+  https://www.bts.gov/newsroom/2022-annual-and-4th-quarter-us-airline-financial-data
 - 2023: BTS 24-24 (May 15, 2024). Revenue $236.3B, operating profit $13.2B,
   net $7.8B, baggage fees $7.1B, change fees $1.1B, 26 airlines.
   https://www.bts.gov/newsroom/us-airlines-gain-78-billion-2023-increase-over-2022

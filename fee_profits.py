@@ -31,12 +31,15 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 
 # ---------------------------------------------------------------------------
 # BTS annual results, all U.S. scheduled passenger airlines ($B).
-# Sources in SOURCES.md. 2020 kept as a stress case, not part of the trend.
+# Sources in SOURCES.md. Continuous 2019-2025 series; the 2020-2021 loss
+# years are kept as stress cases, not part of the profit-year trend chart.
 # ---------------------------------------------------------------------------
 BTS = [
     # year, op_revenue, op_profit, net_income, baggage_fees, change_fees, n_airlines
     (2019, 196.2, 20.8, 14.8, 5.8, 2.8, 21),
     (2020, 77.3, -46.5, -35.0, 2.8, 0.9, 23),
+    (2021, 130.0, -17.3, -2.8, 5.3, 0.7, 25),
+    (2022, 211.2, 7.9, 1.6, 6.8, 1.0, 25),
     (2023, 236.3, 13.2, 7.8, 7.1, 1.1, 26),
     (2024, 247.2, 13.5, 6.7, 7.3, 1.0, 25),
     (2025, 252.6, 11.4, 6.0, 7.4, 1.1, 25),
@@ -108,7 +111,7 @@ def main():
             "op_margin_ex_fees_%": round((op - fees) / rev * 100, 1),
             "note": ("counterfactual holds expenses flat: upper bound on fee "
                      "contribution" if op > 0 else
-                     "pandemic year: fees did not offset the operating loss"),
+                     "loss year: fees did not offset the operating loss"),
         })
 
     with open(os.path.join(HERE, "results.csv"), "w", newline="") as f:
@@ -117,7 +120,7 @@ def main():
         w.writerows(rows)
 
     # ---- chart: operating profit vs ex-fee operating profit (profit years) --
-    trend = [r for r in rows if r["year"] != 2020]
+    trend = [r for r in rows if r["operating_profit_$B"] > 0]
     yrs = [str(r["year"]) for r in trend]
     fig, ax = plt.subplots(figsize=(8.5, 4.2))
     x = range(len(yrs))
@@ -158,6 +161,12 @@ def main():
         print(f"{r['year']}: reported fees (${r['reported_fees_total_$B']:.1f}B) "
               f"exceed the industry's after-tax net income "
               f"(${r['net_income_$B']:.1f}B).")
+    r2022 = next(r for r in rows if r["year"] == 2022)
+    print(f"2022: reported fees (${r2022['reported_fees_total_$B']:.1f}B) were "
+          f"{r2022['fees_share_of_op_profit_%']:.1f}% of the $7.9B operating "
+          f"profit -- ex-fee operating profit was just "
+          f"${r2022['op_profit_ex_fees_$B']:.1f}B in the first profit year "
+          f"after the pandemic losses.")
     print()
     print("Caveats: fee counterfactual holds expenses flat (upper bound);")
     print("seat/food/other ancillary revenue is NOT in the BTS fee lines,")
