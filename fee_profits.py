@@ -16,6 +16,12 @@ vanished and nothing else changed," not as a precise segment P&L.
 Second cut: operating margins for the Big 4 carriers (Delta, United,
 American, Southwest) pulled live from SEC EDGAR company facts (10-K
 filings), to show how thin the underlying business runs.
+
+Third cut: the fee mix itself. Baggage and change fees are tracked
+separately (fee_mix.csv / fee_mix.png) because they moved in opposite
+directions after 2019 -- change fees collapsed when most large carriers
+dropped them on standard tickets in 2020 and never came back, while
+baggage fees kept climbing. The headline fee total hides that split.
 """
 
 import csv
@@ -119,6 +125,49 @@ def main():
         w.writeheader()
         w.writerows(rows)
 
+    # ---- fee mix: baggage vs change fees (they diverged after 2019) ----
+    base = next(r for r in rows if r["year"] == 2019)
+    mix = []
+    for r in rows:
+        total = r["reported_fees_total_$B"]
+        mix.append({
+            "year": r["year"],
+            "baggage_fees_$B": r["baggage_fees_$B"],
+            "change_fees_$B": r["change_fees_$B"],
+            "reported_fees_total_$B": total,
+            "baggage_share_of_fees_%": round(
+                r["baggage_fees_$B"] / total * 100, 1) if total else "",
+            "change_share_of_fees_%": round(
+                r["change_fees_$B"] / total * 100, 1) if total else "",
+            "baggage_vs_2019_%": round(
+                (r["baggage_fees_$B"] / base["baggage_fees_$B"] - 1) * 100, 1),
+            "change_vs_2019_%": round(
+                (r["change_fees_$B"] / base["change_fees_$B"] - 1) * 100, 1),
+        })
+    with open(os.path.join(HERE, "fee_mix.csv"), "w", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=list(mix[0].keys()))
+        w.writeheader()
+        w.writerows(mix)
+
+    fig, ax = plt.subplots(figsize=(8.5, 4.2))
+    yrs_mix = [str(m["year"]) for m in mix]
+    ax.bar(yrs_mix, [m["baggage_fees_$B"] for m in mix],
+           color="#1f4e79", label="Baggage fees")
+    ax.bar(yrs_mix, [m["change_fees_$B"] for m in mix],
+           bottom=[m["baggage_fees_$B"] for m in mix],
+           color="#c9a227", label="Reservation change fees")
+    for i, m in enumerate(mix):
+        ax.text(i, m["reported_fees_total_$B"] + 0.25,
+                f"{m['baggage_share_of_fees_%']:.0f}% bags",
+                ha="center", fontsize=8)
+    ax.set_ylabel("$B")
+    ax.set_title("U.S. airlines: reported fee mix (BTS)\n"
+                 "baggage share of baggage + change fees, labelled")
+    ax.legend(fontsize=9)
+    fig.tight_layout()
+    fig.savefig(os.path.join(HERE, "fee_mix.png"), dpi=120)
+    plt.close(fig)
+
     # ---- chart: operating profit vs ex-fee operating profit (profit years) --
     trend = [r for r in rows if r["operating_profit_$B"] > 0]
     yrs = [str(r["year"]) for r in trend]
@@ -167,6 +216,21 @@ def main():
           f"profit -- ex-fee operating profit was just "
           f"${r2022['op_profit_ex_fees_$B']:.1f}B in the first profit year "
           f"after the pandemic losses.")
+    m19 = next(m for m in mix if m["year"] == 2019)
+    m25 = next(m for m in mix if m["year"] == 2025)
+    print()
+    print("Fee mix (baggage vs change):")
+    print(f"  2019: bags ${m19['baggage_fees_$B']:.1f}B "
+          f"({m19['baggage_share_of_fees_%']:.1f}% of fees), change "
+          f"${m19['change_fees_$B']:.1f}B ({m19['change_share_of_fees_%']:.1f}%)")
+    print(f"  2025: bags ${m25['baggage_fees_$B']:.1f}B "
+          f"({m25['baggage_share_of_fees_%']:.1f}% of fees), change "
+          f"${m25['change_fees_$B']:.1f}B ({m25['change_share_of_fees_%']:.1f}%)")
+    print(f"  2019->2025: baggage {m25['baggage_vs_2019_%']:+.1f}%, change "
+          f"{m25['change_vs_2019_%']:+.1f}%; total fees "
+          f"${m19['reported_fees_total_$B']:.1f}B -> "
+          f"${m25['reported_fees_total_$B']:.1f}B -- the fee story is now "
+          f"almost entirely baggage.")
     print()
     print("Caveats: fee counterfactual holds expenses flat (upper bound);")
     print("seat/food/other ancillary revenue is NOT in the BTS fee lines,")
@@ -195,7 +259,8 @@ def main():
         print()
         print("Big 4 EDGAR pull unavailable this run; BTS results stand alone.")
     print()
-    print("Sources: SOURCES.md (results.csv, results.png written).")
+    print("Sources: SOURCES.md (results.csv, results.png, fee_mix.csv, "
+          "fee_mix.png written).")
 
 
 if __name__ == "__main__":
