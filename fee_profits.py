@@ -22,6 +22,16 @@ separately (fee_mix.csv / fee_mix.png) because they moved in opposite
 directions after 2019 -- change fees collapsed when most large carriers
 dropped them on standard tickets in 2020 and never came back, while
 baggage fees kept climbing. The headline fee total hides that split.
+
+Fourth cut (v4): the handling-cost sensitivity. The flat-expense
+counterfactual is stress-tested by assuming handling a checked bag costs
+0 / 25 / 50 / 75% of the baggage fee collected (change fees carry no
+comparable handling cost). If the fees vanished, that handling cost
+would vanish too, so the net fee contribution is fees minus the avoided
+cost, and adjusted ex-fee profit is operating profit minus that net
+contribution (sensitivity.csv / sensitivity.png). This turns the single
+upper-bound number into a range and shows at what assumed cost rate the
+"net fees are a majority of operating profit" reading stops holding.
 """
 
 import csv
@@ -57,6 +67,103 @@ BIG4 = {  # ticker -> (CIK, name)
     "AAL": (6201, "American"),
     "LUV": (92380, "Southwest"),
 }
+
+# Assumed baggage-handling cost, as a % of baggage fees collected.
+HANDLING_COST_RATES = (0, 25, 50, 75)
+
+
+def build_rows(bts=BTS):
+    """Industry table: reported results plus the flat-expense ex-fee cut."""
+    rows = []
+    for year, rev, op, net, bag, change, n in bts:
+        fees = round(bag + change, 1)
+        rows.append({
+            "year": year,
+            "airlines_reporting": n,
+            "operating_revenue_$B": rev,
+            "operating_profit_$B": op,
+            "net_income_$B": net,
+            "baggage_fees_$B": bag,
+            "change_fees_$B": change,
+            "reported_fees_total_$B": fees,
+            "fees_share_of_revenue_%": round(fees / rev * 100, 1),
+            "fees_share_of_op_profit_%": (round(fees / op * 100, 1)
+                                          if op > 0 else ""),
+            "op_profit_ex_fees_$B": round(op - fees, 1),
+            "op_margin_%": round(op / rev * 100, 1),
+            "op_margin_ex_fees_%": round((op - fees) / rev * 100, 1),
+            "note": ("counterfactual holds expenses flat: upper bound on fee "
+                     "contribution" if op > 0 else
+                     "loss year: fees did not offset the operating loss"),
+        })
+    return rows
+
+
+def build_mix(rows):
+    """Fee mix: baggage vs change fees, shares and 2019-indexed change."""
+    base = next(r for r in rows if r["year"] == 2019)
+    mix = []
+    for r in rows:
+        total = r["reported_fees_total_$B"]
+        mix.append({
+            "year": r["year"],
+            "baggage_fees_$B": r["baggage_fees_$B"],
+            "change_fees_$B": r["change_fees_$B"],
+            "reported_fees_total_$B": total,
+            "baggage_share_of_fees_%": round(
+                r["baggage_fees_$B"] / total * 100, 1) if total else "",
+            "change_share_of_fees_%": round(
+                r["change_fees_$B"] / total * 100, 1) if total else "",
+            "baggage_vs_2019_%": round(
+                (r["baggage_fees_$B"] / base["baggage_fees_$B"] - 1) * 100, 1),
+            "change_vs_2019_%": round(
+                (r["change_fees_$B"] / base["change_fees_$B"] - 1) * 100, 1),
+        })
+    return mix
+
+
+def build_sensitivity(rows, rates=HANDLING_COST_RATES):
+    """Handling-cost sensitivity, long format (one row per year x rate).
+
+    Avoided cost = rate% of baggage fees only. Net fee contribution =
+    total fees - avoided cost. Adjusted ex-fee profit = operating
+    profit - net contribution, so at 0% it equals the flat-expense
+    ex-fee profit in results.csv and it rises as the assumed cost rises.
+    """
+    out = []
+    for r in rows:
+        fees = r["reported_fees_total_$B"]
+        op = r["operating_profit_$B"]
+        rev = r["operating_revenue_$B"]
+        for rate in rates:
+            avoided = round(r["baggage_fees_$B"] * rate / 100, 2)
+            net = round(fees - avoided, 2)
+            adj = round(op - net, 2)
+            out.append({
+                "year": r["year"],
+                "handling_cost_%_of_baggage_fees": rate,
+                "assumed_handling_cost_$B": avoided,
+                "net_fee_contribution_$B": net,
+                "net_fees_share_of_op_profit_%": (
+                    round(net / op * 100, 1) if op > 0 else ""),
+                "op_profit_ex_net_fees_$B": adj,
+                "op_margin_ex_net_fees_%": round(adj / rev * 100, 1),
+            })
+    return out
+
+
+def majority_threshold_rate(row):
+    """Handling-cost rate (%) at which net fees = 50% of operating profit.
+
+    Solves (fees - rate * baggage) / op_profit = 0.5 for the rate.
+    Returns None for loss years. A negative value means net fees were
+    already below half of operating profit at a 0% handling cost.
+    """
+    op = row["operating_profit_$B"]
+    if op <= 0 or not row["baggage_fees_$B"]:
+        return None
+    rate = (row["reported_fees_total_$B"] - 0.5 * op) / row["baggage_fees_$B"]
+    return round(rate * 100, 1)
 
 
 def edgar_big4(years=(2023, 2024, 2025)):
@@ -97,28 +204,7 @@ def edgar_big4(years=(2023, 2024, 2025)):
 
 
 def main():
-    rows = []
-    for year, rev, op, net, bag, change, n in BTS:
-        fees = round(bag + change, 1)
-        rows.append({
-            "year": year,
-            "airlines_reporting": n,
-            "operating_revenue_$B": rev,
-            "operating_profit_$B": op,
-            "net_income_$B": net,
-            "baggage_fees_$B": bag,
-            "change_fees_$B": change,
-            "reported_fees_total_$B": fees,
-            "fees_share_of_revenue_%": round(fees / rev * 100, 1),
-            "fees_share_of_op_profit_%": (round(fees / op * 100, 1)
-                                          if op > 0 else ""),
-            "op_profit_ex_fees_$B": round(op - fees, 1),
-            "op_margin_%": round(op / rev * 100, 1),
-            "op_margin_ex_fees_%": round((op - fees) / rev * 100, 1),
-            "note": ("counterfactual holds expenses flat: upper bound on fee "
-                     "contribution" if op > 0 else
-                     "loss year: fees did not offset the operating loss"),
-        })
+    rows = build_rows()
 
     with open(os.path.join(HERE, "results.csv"), "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
@@ -126,24 +212,7 @@ def main():
         w.writerows(rows)
 
     # ---- fee mix: baggage vs change fees (they diverged after 2019) ----
-    base = next(r for r in rows if r["year"] == 2019)
-    mix = []
-    for r in rows:
-        total = r["reported_fees_total_$B"]
-        mix.append({
-            "year": r["year"],
-            "baggage_fees_$B": r["baggage_fees_$B"],
-            "change_fees_$B": r["change_fees_$B"],
-            "reported_fees_total_$B": total,
-            "baggage_share_of_fees_%": round(
-                r["baggage_fees_$B"] / total * 100, 1) if total else "",
-            "change_share_of_fees_%": round(
-                r["change_fees_$B"] / total * 100, 1) if total else "",
-            "baggage_vs_2019_%": round(
-                (r["baggage_fees_$B"] / base["baggage_fees_$B"] - 1) * 100, 1),
-            "change_vs_2019_%": round(
-                (r["change_fees_$B"] / base["change_fees_$B"] - 1) * 100, 1),
-        })
+    mix = build_mix(rows)
     with open(os.path.join(HERE, "fee_mix.csv"), "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=list(mix[0].keys()))
         w.writeheader()
@@ -166,6 +235,33 @@ def main():
     ax.legend(fontsize=9)
     fig.tight_layout()
     fig.savefig(os.path.join(HERE, "fee_mix.png"), dpi=120)
+    plt.close(fig)
+
+    # ---- handling-cost sensitivity (v4) ----
+    sens = build_sensitivity(rows)
+    with open(os.path.join(HERE, "sensitivity.csv"), "w", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=list(sens[0].keys()))
+        w.writeheader()
+        w.writerows(sens)
+
+    fig, ax = plt.subplots(figsize=(8.5, 4.2))
+    for r in rows:
+        if r["operating_profit_$B"] <= 0:
+            continue
+        ys = [s["net_fees_share_of_op_profit_%"] for s in sens
+              if s["year"] == r["year"]]
+        ax.plot(HANDLING_COST_RATES, ys, marker="o",
+                label=f"{r['year']} (fees ${r['reported_fees_total_$B']:.1f}B)")
+    ax.axhline(50, color="#b00020", linestyle="--", linewidth=1,
+               label="Net fees = 50% of operating profit")
+    ax.set_xlabel("Assumed baggage-handling cost (% of baggage fees)")
+    ax.set_ylabel("Net fees as % of operating profit")
+    ax.set_xticks(list(HANDLING_COST_RATES))
+    ax.set_title("U.S. airlines: how much of the fee headline survives\n"
+                 "a baggage-handling cost? (profit years only)")
+    ax.legend(fontsize=8)
+    fig.tight_layout()
+    fig.savefig(os.path.join(HERE, "sensitivity.png"), dpi=120)
     plt.close(fig)
 
     # ---- chart: operating profit vs ex-fee operating profit (profit years) --
@@ -232,7 +328,22 @@ def main():
           f"${m25['reported_fees_total_$B']:.1f}B -- the fee story is now "
           f"almost entirely baggage.")
     print()
+    print("Handling-cost sensitivity (cost = % of baggage fees):")
+    for yr in (2022, 2023, 2024, 2025):
+        sel = {s["handling_cost_%_of_baggage_fees"]: s for s in sens
+               if s["year"] == yr}
+        row = next(r for r in rows if r["year"] == yr)
+        print(f"  {yr}: at 50% cost, net fees "
+              f"${sel[50]['net_fee_contribution_$B']:.2f}B "
+              f"({sel[50]['net_fees_share_of_op_profit_%']:.1f}% of op "
+              f"profit), adjusted ex-fee profit "
+              f"${sel[50]['op_profit_ex_net_fees_$B']:.2f}B "
+              f"({sel[50]['op_margin_ex_net_fees_%']:.1f}% margin); "
+              f"net fees fall to half of op profit at a "
+              f"{majority_threshold_rate(row):.1f}% handling cost.")
+    print()
     print("Caveats: fee counterfactual holds expenses flat (upper bound);")
+    print("the sensitivity relaxes that for baggage handling only --")
     print("seat/food/other ancillary revenue is NOT in the BTS fee lines,")
     print("so total ancillary dependence is larger than shown.")
 
@@ -260,7 +371,7 @@ def main():
         print("Big 4 EDGAR pull unavailable this run; BTS results stand alone.")
     print()
     print("Sources: SOURCES.md (results.csv, results.png, fee_mix.csv, "
-          "fee_mix.png written).")
+          "fee_mix.png, sensitivity.csv, sensitivity.png written).")
 
 
 if __name__ == "__main__":
