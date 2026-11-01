@@ -8,7 +8,10 @@ import unittest
 
 from fee_profits import (
     BTS,
+    ERAS,
     HANDLING_COST_RATES,
+    build_cumulative,
+    build_eras,
     build_mix,
     build_rows,
     build_sensitivity,
@@ -132,6 +135,77 @@ class TestSensitivity(unittest.TestCase):
             s = build_sensitivity([row], rates=(rate,))[0]
             self.assertAlmostEqual(s["net_fees_share_of_op_profit_%"],
                                    50.0, delta=1.0)
+
+
+class TestCumulativeAndEras(unittest.TestCase):
+    def setUp(self):
+        self.rows = build_rows()
+        self.cum = build_cumulative(self.rows)
+        self.eras = {e["era"]: e for e in build_eras(self.rows)}
+
+    def test_cumulative_shape_and_gap_identity(self):
+        self.assertEqual(len(self.cum), len(self.rows))
+        for c, row in zip(self.cum, self.rows):
+            self.assertEqual(c["year"], row["year"])
+        last = self.cum[-1]
+        # gap between cumulative op and cumulative ex-fee op IS cum fees
+        self.assertAlmostEqual(
+            last["cumulative_op_profit_$B"]
+            - last["cumulative_op_profit_ex_fees_$B"],
+            last["cumulative_fees_$B"], places=1)
+
+    def test_full_period_hand_math(self):
+        last = self.cum[-1]
+        self.assertEqual(last["cumulative_fees_$B"], 51.1)
+        self.assertEqual(last["cumulative_op_profit_$B"], 3.0)
+        self.assertEqual(last["cumulative_net_income_$B"], -0.9)
+        self.assertEqual(last["cumulative_op_profit_ex_fees_$B"], -48.1)
+
+    def test_cumulative_fees_monotonic_and_trough(self):
+        fees = [c["cumulative_fees_$B"] for c in self.cum]
+        self.assertEqual(fees, sorted(fees))
+        trough = min(self.cum, key=lambda c: c["cumulative_op_profit_$B"])
+        self.assertEqual(trough["year"], 2021)
+        self.assertEqual(trough["cumulative_op_profit_$B"], -43.0)
+
+    def test_era_totals_match_yearly_rows(self):
+        self.assertEqual([e for e in self.eras], [e[0] for e in ERAS])
+        for label, years in ERAS:
+            sel = [r for r in self.rows if r["year"] in years]
+            e = self.eras[label]
+            self.assertAlmostEqual(
+                e["operating_profit_$B"],
+                round(sum(r["operating_profit_$B"] for r in sel), 1),
+                places=1)
+            self.assertAlmostEqual(
+                e["reported_fees_total_$B"],
+                round(sum(r["reported_fees_total_$B"] for r in sel), 1),
+                places=1)
+            self.assertAlmostEqual(
+                e["op_profit_ex_fees_$B"],
+                round(e["operating_profit_$B"]
+                      - e["reported_fees_total_$B"], 1), places=1)
+
+    def test_recovery_era_hand_math(self):
+        rec = self.eras["2023-2025"]
+        self.assertEqual(rec["operating_profit_$B"], 38.1)
+        self.assertEqual(rec["reported_fees_total_$B"], 25.0)
+        self.assertEqual(rec["fees_share_of_op_profit_%"], 65.6)
+        self.assertEqual(rec["op_profit_ex_fees_$B"], 13.1)
+        self.assertEqual(rec["net_income_$B"], 20.5)
+
+    def test_loss_era_has_no_profit_share(self):
+        self.assertEqual(self.eras["2020-2021"]["operating_profit_$B"], -63.8)
+        self.assertEqual(self.eras["2020-2021"]["fees_share_of_op_profit_%"], "")
+
+    def test_single_year_eras_match_rows(self):
+        for yr in (2019, 2022):
+            e = self.eras[str(yr)]
+            r = next(r for r in self.rows if r["year"] == yr)
+            self.assertEqual(e["operating_profit_$B"],
+                             r["operating_profit_$B"])
+            self.assertEqual(e["reported_fees_total_$B"],
+                             r["reported_fees_total_$B"])
 
 
 if __name__ == "__main__":

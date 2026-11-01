@@ -32,6 +32,18 @@ cost, and adjusted ex-fee profit is operating profit minus that net
 contribution (sensitivity.csv / sensitivity.png). This turns the single
 upper-bound number into a range and shows at what assumed cost rate the
 "net fees are a majority of operating profit" reading stops holding.
+
+Fifth cut (v5): the cumulative / era lens. Single-year shares hide what
+the pandemic did to the period total: yearly rows are cumulated
+(cumulative.csv / cumulative.png) and grouped into eras (eras.csv --
+2019, the 2020-2021 loss years, 2022, and the 2023-2025 recovery).
+Over 2019-2025 the industry collected $51.1B of reported fees against
+just $3.0B of cumulative operating profit and -$0.9B of cumulative net
+income, so the ex-fee cumulative operating result is -$48.1B: the fee
+lines are not just a share of one good year, they are most of the
+bridge between a deeply loss-making seven years and a barely positive
+one. The recovery era alone is cleaner: 2023-2025 fees were $25.0B,
+65.6% of the $38.1B operating profit for those three years.
 """
 
 import csv
@@ -152,6 +164,59 @@ def build_sensitivity(rows, rates=HANDLING_COST_RATES):
     return out
 
 
+ERAS = (
+    ("2019", (2019,)),
+    ("2020-2021", (2020, 2021)),
+    ("2022", (2022,)),
+    ("2023-2025", (2023, 2024, 2025)),
+    ("2019-2025", (2019, 2020, 2021, 2022, 2023, 2024, 2025)),
+)
+
+
+def build_cumulative(rows):
+    """Cumulative totals in year order (fees gap = op minus ex-fee op)."""
+    out = []
+    cum_fees = cum_op = cum_net = 0.0
+    for r in rows:
+        cum_fees = round(cum_fees + r["reported_fees_total_$B"], 1)
+        cum_op = round(cum_op + r["operating_profit_$B"], 1)
+        cum_net = round(cum_net + r["net_income_$B"], 1)
+        cum_ex = round(cum_op - cum_fees, 1)
+        out.append({
+            "year": r["year"],
+            "cumulative_fees_$B": cum_fees,
+            "cumulative_op_profit_$B": cum_op,
+            "cumulative_net_income_$B": cum_net,
+            "cumulative_op_profit_ex_fees_$B": cum_ex,
+        })
+    return out
+
+
+def build_eras(rows, eras=ERAS):
+    """Era totals: same flat-expense cut, grouped instead of yearly."""
+    by_year = {r["year"]: r for r in rows}
+    out = []
+    for label, years in eras:
+        sel = [by_year[y] for y in years if y in by_year]
+        if not sel:
+            continue
+        op = round(sum(r["operating_profit_$B"] for r in sel), 1)
+        fees = round(sum(r["reported_fees_total_$B"] for r in sel), 1)
+        net = round(sum(r["net_income_$B"] for r in sel), 1)
+        out.append({
+            "era": label,
+            "years": len(sel),
+            "operating_profit_$B": op,
+            "reported_fees_total_$B": fees,
+            "net_income_$B": net,
+            "fees_share_of_op_profit_%": (
+                round(fees / op * 100, 1) if op > 0 else ""),
+            "op_profit_ex_fees_$B": round(op - fees, 1),
+            "fees_minus_net_income_$B": round(fees - net, 1),
+        })
+    return out
+
+
 def majority_threshold_rate(row):
     """Handling-cost rate (%) at which net fees = 50% of operating profit.
 
@@ -264,6 +329,36 @@ def main():
     fig.savefig(os.path.join(HERE, "sensitivity.png"), dpi=120)
     plt.close(fig)
 
+    # ---- cumulative / era lens (v5) ----
+    cum = build_cumulative(rows)
+    with open(os.path.join(HERE, "cumulative.csv"), "w", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=list(cum[0].keys()))
+        w.writeheader()
+        w.writerows(cum)
+
+    eras = build_eras(rows)
+    with open(os.path.join(HERE, "eras.csv"), "w", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=list(eras[0].keys()))
+        w.writeheader()
+        w.writerows(eras)
+
+    fig, ax = plt.subplots(figsize=(8.5, 4.2))
+    yrs_c = [str(c["year"]) for c in cum]
+    ax.plot(yrs_c, [c["cumulative_op_profit_$B"] for c in cum],
+            marker="o", color="#1f4e79",
+            label="Cumulative operating profit (reported)")
+    ax.plot(yrs_c, [c["cumulative_op_profit_ex_fees_$B"] for c in cum],
+            marker="o", color="#b00020",
+            label="Cumulative operating profit ex fees (expenses flat)")
+    ax.axhline(0, color="#555555", linewidth=0.8)
+    ax.set_ylabel("$B, cumulative from 2019")
+    ax.set_title("U.S. airlines: cumulative operating profit with and\n"
+                 "without reported baggage + change fees (BTS)")
+    ax.legend(fontsize=8)
+    fig.tight_layout()
+    fig.savefig(os.path.join(HERE, "cumulative.png"), dpi=120)
+    plt.close(fig)
+
     # ---- chart: operating profit vs ex-fee operating profit (profit years) --
     trend = [r for r in rows if r["operating_profit_$B"] > 0]
     yrs = [str(r["year"]) for r in trend]
@@ -342,6 +437,19 @@ def main():
               f"net fees fall to half of op profit at a "
               f"{majority_threshold_rate(row):.1f}% handling cost.")
     print()
+    print("Cumulative / era lens:")
+    full = next(e for e in eras if e["era"] == "2019-2025")
+    rec = next(e for e in eras if e["era"] == "2023-2025")
+    print(f"  2019-2025: cumulative fees "
+          f"${full['reported_fees_total_$B']:.1f}B vs cumulative operating "
+          f"profit ${full['operating_profit_$B']:.1f}B and cumulative net "
+          f"income ${full['net_income_$B']:.1f}B -- cumulative operating "
+          f"profit ex fees is ${full['op_profit_ex_fees_$B']:.1f}B.")
+    print(f"  2023-2025 recovery: fees ${rec['reported_fees_total_$B']:.1f}B "
+          f"were {rec['fees_share_of_op_profit_%']:.1f}% of the "
+          f"${rec['operating_profit_$B']:.1f}B operating profit; ex-fee "
+          f"operating profit was ${rec['op_profit_ex_fees_$B']:.1f}B.")
+    print()
     print("Caveats: fee counterfactual holds expenses flat (upper bound);")
     print("the sensitivity relaxes that for baggage handling only --")
     print("seat/food/other ancillary revenue is NOT in the BTS fee lines,")
@@ -371,7 +479,8 @@ def main():
         print("Big 4 EDGAR pull unavailable this run; BTS results stand alone.")
     print()
     print("Sources: SOURCES.md (results.csv, results.png, fee_mix.csv, "
-          "fee_mix.png, sensitivity.csv, sensitivity.png written).")
+          "fee_mix.png, sensitivity.csv, sensitivity.png, cumulative.csv, "
+          "cumulative.png, eras.csv written).")
 
 
 if __name__ == "__main__":
