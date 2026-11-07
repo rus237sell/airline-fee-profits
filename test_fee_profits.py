@@ -13,6 +13,7 @@ from fee_profits import (
     build_cumulative,
     build_eras,
     build_mix,
+    build_per_airline,
     build_rows,
     build_sensitivity,
     majority_threshold_rate,
@@ -206,6 +207,82 @@ class TestCumulativeAndEras(unittest.TestCase):
                              r["operating_profit_$B"])
             self.assertEqual(e["reported_fees_total_$B"],
                              r["reported_fees_total_$B"])
+
+
+class TestPerAirline(unittest.TestCase):
+    def setUp(self):
+        self.rows = build_rows()
+        self.pa = build_per_airline(self.rows)
+        self.by_year = {p["year"]: p for p in self.pa}
+
+    def test_shape_matches_rows(self):
+        self.assertEqual(len(self.pa), len(self.rows))
+        for p, row in zip(self.pa, self.rows):
+            self.assertEqual(p["year"], row["year"])
+            self.assertEqual(p["airlines_reporting"],
+                             row["airlines_reporting"])
+
+    def test_per_airline_times_count_recovers_totals(self):
+        for p, row in zip(self.pa, self.rows):
+            n = row["airlines_reporting"]
+            self.assertAlmostEqual(
+                p["op_profit_per_airline_$B"] * n,
+                row["operating_profit_$B"], delta=0.02)
+            self.assertAlmostEqual(
+                p["fees_per_airline_$B"] * n,
+                row["reported_fees_total_$B"], delta=0.02)
+            self.assertAlmostEqual(
+                p["revenue_per_airline_$B"] * n,
+                row["operating_revenue_$B"], delta=0.02)
+
+    def test_ex_fee_identity_per_airline(self):
+        for p in self.pa:
+            self.assertAlmostEqual(
+                p["op_profit_per_airline_$B"]
+                - p["fees_per_airline_$B"],
+                p["op_profit_ex_fees_per_airline_$B"], delta=0.002)
+
+    def test_2019_hand_math(self):
+        p = self.by_year[2019]
+        # 196.2/21, 20.8/21, 12.2/21, 8.6/21
+        self.assertAlmostEqual(p["revenue_per_airline_$B"], 9.343,
+                               places=3)
+        self.assertAlmostEqual(p["op_profit_per_airline_$B"], 0.990,
+                               places=3)
+        self.assertAlmostEqual(
+            p["op_profit_ex_fees_per_airline_$B"], 0.581, places=3)
+        self.assertAlmostEqual(p["fees_per_airline_$B"], 0.410, places=3)
+        self.assertEqual(p["op_profit_per_airline_vs_2019_%"], 0.0)
+        self.assertEqual(p["fees_per_airline_vs_2019_%"], 0.0)
+
+    def test_2025_hand_math_and_vs_2019(self):
+        p = self.by_year[2025]
+        # 252.6/25, 11.4/25, 2.9/25, 8.5/25
+        self.assertAlmostEqual(p["revenue_per_airline_$B"], 10.104,
+                               places=3)
+        self.assertAlmostEqual(p["op_profit_per_airline_$B"], 0.456,
+                               places=3)
+        self.assertAlmostEqual(
+            p["op_profit_ex_fees_per_airline_$B"], 0.116, places=3)
+        self.assertAlmostEqual(p["fees_per_airline_$B"], 0.340, places=3)
+        self.assertEqual(p["op_profit_per_airline_vs_2019_%"], -54.0)
+        self.assertEqual(p["fees_per_airline_vs_2019_%"], -17.0)
+
+    def test_2022_ex_fee_per_airline_is_near_zero(self):
+        # 0.1 ex-fee profit spread over 25 carriers
+        self.assertAlmostEqual(
+            self.by_year[2022]["op_profit_ex_fees_per_airline_$B"],
+            0.004, places=3)
+
+    def test_fees_per_airline_fell_while_op_share_rose(self):
+        # The v6 point: fees per carrier are lower in 2025 than 2019
+        # even though fees are a larger share of operating profit.
+        r19 = next(r for r in self.rows if r["year"] == 2019)
+        r25 = next(r for r in self.rows if r["year"] == 2025)
+        self.assertLess(self.by_year[2025]["fees_per_airline_$B"],
+                        self.by_year[2019]["fees_per_airline_$B"])
+        self.assertGreater(r25["fees_share_of_op_profit_%"],
+                           r19["fees_share_of_op_profit_%"])
 
 
 if __name__ == "__main__":

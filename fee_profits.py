@@ -44,6 +44,17 @@ lines are not just a share of one good year, they are most of the
 bridge between a deeply loss-making seven years and a barely positive
 one. The recovery era alone is cleaner: 2023-2025 fees were $25.0B,
 65.6% of the $38.1B operating profit for those three years.
+
+Sixth cut (v6): the per-airline lens. The reporting count moved from
+21 carriers in 2019 to 25 in 2025, so industry totals mix a scale
+change with a performance change. Dividing by airlines_reporting
+(per_airline.csv / per_airline.png) separates them: revenue per
+airline in 2025 ($10.10B) is 8.1% above 2019 ($9.34B), so scale has
+recovered, but operating profit per airline ($0.456B) is 54.0% below
+2019 ($0.990B) and ex-fee operating profit per airline has fallen
+from $0.581B to $0.116B. Fees per airline actually fell 17.0%
+($0.410B to $0.340B) -- the fee share of profit rose not because fees
+per carrier grew, but because ex-fee profit per carrier collapsed.
 """
 
 import csv
@@ -217,6 +228,45 @@ def build_eras(rows, eras=ERAS):
     return out
 
 
+def build_per_airline(rows):
+    """Per-reporting-airline cut: every total divided by that year's
+    airlines_reporting, plus the change vs 2019 for the two lines that
+    carry the story (operating profit and fees per airline).
+
+    This is an average across reporting carriers, not a typical
+    carrier: the Big 4 are far larger than the smallest reporters, so
+    read it as an industry total on a per-reporter scale, useful for
+    separating a change in how many carriers report from a change in
+    how each dollar of industry result is spread across them.
+    """
+    base = next(r for r in rows if r["year"] == 2019)
+    base_op = base["operating_profit_$B"] / base["airlines_reporting"]
+    base_fees = (base["reported_fees_total_$B"]
+                 / base["airlines_reporting"])
+    out = []
+    for r in rows:
+        n = r["airlines_reporting"]
+        op_pa = r["operating_profit_$B"] / n
+        fees_pa = r["reported_fees_total_$B"] / n
+        out.append({
+            "year": r["year"],
+            "airlines_reporting": n,
+            "revenue_per_airline_$B": round(
+                r["operating_revenue_$B"] / n, 3),
+            "op_profit_per_airline_$B": round(op_pa, 3),
+            "op_profit_ex_fees_per_airline_$B": round(
+                r["op_profit_ex_fees_$B"] / n, 3),
+            "fees_per_airline_$B": round(fees_pa, 3),
+            "net_income_per_airline_$B": round(
+                r["net_income_$B"] / n, 3),
+            "op_profit_per_airline_vs_2019_%": round(
+                (op_pa / base_op - 1) * 100, 1) if base_op else "",
+            "fees_per_airline_vs_2019_%": round(
+                (fees_pa / base_fees - 1) * 100, 1) if base_fees else "",
+        })
+    return out
+
+
 def majority_threshold_rate(row):
     """Handling-cost rate (%) at which net fees = 50% of operating profit.
 
@@ -359,6 +409,35 @@ def main():
     fig.savefig(os.path.join(HERE, "cumulative.png"), dpi=120)
     plt.close(fig)
 
+    # ---- per-airline lens (v6) ----
+    per_airline = build_per_airline(rows)
+    with open(os.path.join(HERE, "per_airline.csv"), "w", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=list(per_airline[0].keys()))
+        w.writeheader()
+        w.writerows(per_airline)
+
+    fig, ax = plt.subplots(figsize=(8.5, 4.2))
+    yrs_pa = [str(p["year"]) for p in per_airline]
+    x_pa = range(len(yrs_pa))
+    ax.bar([i - 0.2 for i in x_pa],
+           [p["op_profit_per_airline_$B"] for p in per_airline],
+           width=0.4, color="#1f4e79",
+           label="Operating profit per airline (reported)")
+    ax.bar([i + 0.2 for i in x_pa],
+           [p["op_profit_ex_fees_per_airline_$B"] for p in per_airline],
+           width=0.4, color="#b00020",
+           label="Ex-fee operating profit per airline (expenses flat)")
+    ax.axhline(0, color="#555555", linewidth=0.8)
+    ax.set_xticks(list(x_pa))
+    ax.set_xticklabels(yrs_pa)
+    ax.set_ylabel("$B per reporting airline")
+    ax.set_title("U.S. airlines: operating profit per reporting airline\n"
+                 "with and without reported baggage + change fees (BTS)")
+    ax.legend(fontsize=8)
+    fig.tight_layout()
+    fig.savefig(os.path.join(HERE, "per_airline.png"), dpi=120)
+    plt.close(fig)
+
     # ---- chart: operating profit vs ex-fee operating profit (profit years) --
     trend = [r for r in rows if r["operating_profit_$B"] > 0]
     yrs = [str(r["year"]) for r in trend]
@@ -450,6 +529,26 @@ def main():
           f"${rec['operating_profit_$B']:.1f}B operating profit; ex-fee "
           f"operating profit was ${rec['op_profit_ex_fees_$B']:.1f}B.")
     print()
+    print("Per-airline lens:")
+    pa19 = next(p for p in per_airline if p["year"] == 2019)
+    pa25 = next(p for p in per_airline if p["year"] == 2025)
+    print(f"  Revenue per airline: ${pa19['revenue_per_airline_$B']:.2f}B "
+          f"(2019, {pa19['airlines_reporting']} carriers) -> "
+          f"${pa25['revenue_per_airline_$B']:.2f}B (2025, "
+          f"{pa25['airlines_reporting']} carriers) -- scale recovered.")
+    print(f"  Operating profit per airline: "
+          f"${pa19['op_profit_per_airline_$B']:.3f}B -> "
+          f"${pa25['op_profit_per_airline_$B']:.3f}B "
+          f"({pa25['op_profit_per_airline_vs_2019_%']:+.1f}% vs 2019); "
+          f"ex-fee ${pa19['op_profit_ex_fees_per_airline_$B']:.3f}B -> "
+          f"${pa25['op_profit_ex_fees_per_airline_$B']:.3f}B.")
+    print(f"  Fees per airline change vs 2019: "
+          f"{pa25['fees_per_airline_vs_2019_%']:+.1f}% "
+          f"(${pa19['fees_per_airline_$B']:.3f}B -> "
+          f"${pa25['fees_per_airline_$B']:.3f}B) -- the fee share of "
+          f"profit rose because ex-fee profit per carrier collapsed, "
+          f"not because fees per carrier grew.")
+    print()
     print("Caveats: fee counterfactual holds expenses flat (upper bound);")
     print("the sensitivity relaxes that for baggage handling only --")
     print("seat/food/other ancillary revenue is NOT in the BTS fee lines,")
@@ -480,7 +579,8 @@ def main():
     print()
     print("Sources: SOURCES.md (results.csv, results.png, fee_mix.csv, "
           "fee_mix.png, sensitivity.csv, sensitivity.png, cumulative.csv, "
-          "cumulative.png, eras.csv written).")
+          "cumulative.png, eras.csv, per_airline.csv, per_airline.png "
+          "written).")
 
 
 if __name__ == "__main__":
