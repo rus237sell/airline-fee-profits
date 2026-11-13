@@ -1,8 +1,8 @@
 """Unit checks for the airline fee profit calculations.
 
 Run: python3 -m unittest test_fee_profits -v
-No network: these test build_rows / build_mix / build_sensitivity only,
-not the live EDGAR pull.
+No network: these test the build_* functions only, not the live EDGAR
+pull (the Big 4 split is tested against a fixed EDGAR fixture).
 """
 import unittest
 
@@ -10,6 +10,7 @@ from fee_profits import (
     BTS,
     ERAS,
     HANDLING_COST_RATES,
+    build_big4_vs_rest,
     build_cumulative,
     build_eras,
     build_mix,
@@ -18,6 +19,17 @@ from fee_profits import (
     build_sensitivity,
     majority_threshold_rate,
 )
+
+# EDGAR Big 4 rows as pulled live (ticker, year, revenue $B, op income $B);
+# duplicated here so the split tests need no network.
+BIG4_FIXTURE = [
+    ("DAL", 2023, 58.05, 5.52), ("UAL", 2023, 53.72, 4.21),
+    ("AAL", 2023, 52.79, 3.03), ("LUV", 2023, 26.09, 0.22),
+    ("DAL", 2024, 61.64, 6.00), ("UAL", 2024, 57.06, 5.10),
+    ("AAL", 2024, 54.21, 2.61), ("LUV", 2024, 27.48, 0.32),
+    ("DAL", 2025, 63.36, 5.82), ("UAL", 2025, 59.07, 4.71),
+    ("AAL", 2025, 54.63, 1.47), ("LUV", 2025, 28.06, 0.43),
+]
 
 
 class TestBuildRows(unittest.TestCase):
@@ -283,6 +295,78 @@ class TestPerAirline(unittest.TestCase):
                         self.by_year[2019]["fees_per_airline_$B"])
         self.assertGreater(r25["fees_share_of_op_profit_%"],
                            r19["fees_share_of_op_profit_%"])
+
+
+class TestBig4VsRest(unittest.TestCase):
+    def setUp(self):
+        self.rows = build_rows()
+        self.split = build_big4_vs_rest(self.rows, BIG4_FIXTURE)
+        self.by_year = {s["year"]: s for s in self.split}
+
+    def test_only_years_in_both_sources(self):
+        self.assertEqual([s["year"] for s in self.split], [2023, 2024, 2025])
+        for s in self.split:
+            self.assertEqual(s["big4_carriers"], 4)
+
+    def test_big4_plus_rest_recovers_industry(self):
+        for s in self.split:
+            self.assertAlmostEqual(
+                s["big4_revenue_$B"] + s["rest_revenue_$B"],
+                s["industry_revenue_$B"], places=2)
+            self.assertAlmostEqual(
+                s["big4_op_profit_$B"] + s["rest_op_profit_$B"],
+                s["industry_op_profit_$B"], places=2)
+            row = next(r for r in self.rows if r["year"] == s["year"])
+            self.assertEqual(s["rest_carriers_reporting"],
+                             row["airlines_reporting"] - 4)
+
+    def test_2025_hand_math(self):
+        s = self.by_year[2025]
+        # Big 4: 63.36+59.07+54.63+28.06 = 205.12; 5.82+4.71+1.47+0.43 = 12.43
+        self.assertAlmostEqual(s["big4_revenue_$B"], 205.12, places=2)
+        self.assertAlmostEqual(s["big4_op_profit_$B"], 12.43, places=2)
+        self.assertEqual(s["big4_op_margin_%"], 6.1)
+        self.assertEqual(s["big4_share_of_industry_revenue_%"], 81.2)
+        self.assertEqual(s["big4_share_of_industry_op_profit_%"], 109.0)
+        # Rest: 252.6-205.12 = 47.48; 11.4-12.43 = -1.03
+        self.assertAlmostEqual(s["rest_revenue_$B"], 47.48, places=2)
+        self.assertAlmostEqual(s["rest_op_profit_$B"], -1.03, places=2)
+        self.assertEqual(s["rest_op_margin_%"], -2.2)
+        self.assertEqual(s["rest_carriers_reporting"], 21)
+
+    def test_2023_rest_barely_positive_2024_negative(self):
+        s23 = self.by_year[2023]
+        self.assertAlmostEqual(s23["big4_op_profit_$B"], 12.98, places=2)
+        self.assertAlmostEqual(s23["rest_op_profit_$B"], 0.22, places=2)
+        self.assertEqual(s23["big4_share_of_industry_op_profit_%"], 98.3)
+        self.assertEqual(s23["rest_op_margin_%"], 0.5)
+        s24 = self.by_year[2024]
+        self.assertAlmostEqual(s24["rest_op_profit_$B"], -0.53, places=2)
+        self.assertEqual(s24["big4_share_of_industry_op_profit_%"], 103.9)
+
+    def test_profit_share_can_exceed_100(self):
+        # Not an error: a share above 100% means the rest lost money.
+        for yr in (2024, 2025):
+            self.assertGreater(
+                self.by_year[yr]["big4_share_of_industry_op_profit_%"], 100)
+            self.assertLess(self.by_year[yr]["rest_op_profit_$B"], 0)
+
+    def test_revenue_share_stable_near_81(self):
+        shares = [s["big4_share_of_industry_revenue_%"] for s in self.split]
+        self.assertTrue(all(80.0 < x < 82.0 for x in shares))
+
+    def test_years_outside_industry_or_big4_are_skipped(self):
+        extra = BIG4_FIXTURE + [("DAL", 2019, 47.0, 5.0),
+                                 ("XXX", 2030, 1.0, 1.0)]
+        split = build_big4_vs_rest(self.rows, extra)
+        # 2019 has no full Big 4 set in the fixture but DAL alone would
+        # aggregate; only assert the out-of-range year is dropped and
+        # the three EDGAR years stay intact.
+        self.assertNotIn(2030, [s["year"] for s in split])
+        self.assertEqual(
+            {s["year"]: s["big4_op_profit_$B"] for s in split
+             if s["year"] in self.by_year},
+            {y: s["big4_op_profit_$B"] for y, s in self.by_year.items()})
 
 
 if __name__ == "__main__":

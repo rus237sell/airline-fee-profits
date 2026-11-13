@@ -55,6 +55,20 @@ recovered, but operating profit per airline ($0.456B) is 54.0% below
 from $0.581B to $0.116B. Fees per airline actually fell 17.0%
 ($0.410B to $0.340B) -- the fee share of profit rose not because fees
 per carrier grew, but because ex-fee profit per carrier collapsed.
+
+Seventh cut (v7): the Big 4 vs rest-of-industry split. The Big 4 EDGAR
+table was only ever printed as margin context; here it is joined to the
+BTS industry totals (build_big4_vs_rest, big4_vs_rest.csv /
+big4_vs_rest.png), so the rest of the industry is the implied residual
+(industry minus Big 4). The residual is approximate -- the two sources
+define revenue slightly differently -- but the gap is far larger than
+any definition difference: the Big 4 took about 81% of revenue in each
+of 2023-2025 yet 98.3% of operating profit in 2023, 103.9% in 2024 and
+109.0% in 2025, so the other reporting carriers combined earned
+$0.22B in 2023 and lost money in both 2024 (-$0.53B, -1.1% margin) and
+2025 (-$1.03B, -2.2% margin). The industry profit the fees are compared
+against is, in other words, entirely a Big 4 profit; BTS does not split
+fees by carrier, so the rest's ex-fee result cannot be computed here.
 """
 
 import csv
@@ -263,6 +277,60 @@ def build_per_airline(rows):
                 (op_pa / base_op - 1) * 100, 1) if base_op else "",
             "fees_per_airline_vs_2019_%": round(
                 (fees_pa / base_fees - 1) * 100, 1) if base_fees else "",
+        })
+    return out
+
+
+def build_big4_vs_rest(rows, big4):
+    """Big 4 vs rest-of-industry split: aggregate the EDGAR Big 4 rows
+    (ticker, year, revenue_$B, op_income_$B) by year and subtract them
+    from the BTS industry totals, leaving the rest as an implied
+    residual. Only years present in both sources are emitted.
+
+    The residual mixes two sources whose revenue definitions differ
+    slightly (BTS operating revenue vs EDGAR contract revenue), so
+    read the rest's dollars as approximate; its margin and the Big 4
+    profit share carry the point. The Big 4 share of operating profit
+    can exceed 100% -- that is the finding, not an error: it means
+    the rest of the industry combined lost money that year.
+    """
+    by_year = {r["year"]: r for r in rows}
+    agg = {}
+    for _ticker, yr, rev, op in big4:
+        if yr not in by_year:
+            continue
+        a = agg.setdefault(yr, {"rev": 0.0, "op": 0.0, "carriers": 0})
+        a["rev"] = round(a["rev"] + rev, 2)
+        a["op"] = round(a["op"] + op, 2)
+        a["carriers"] += 1
+    out = []
+    for yr in sorted(agg):
+        ind = by_year[yr]
+        big = agg[yr]
+        rest_rev = round(ind["operating_revenue_$B"] - big["rev"], 2)
+        rest_op = round(ind["operating_profit_$B"] - big["op"], 2)
+        ind_op = ind["operating_profit_$B"]
+        out.append({
+            "year": yr,
+            "big4_carriers": big["carriers"],
+            "big4_revenue_$B": big["rev"],
+            "big4_op_profit_$B": big["op"],
+            "big4_op_margin_%": round(big["op"] / big["rev"] * 100, 1)
+            if big["rev"] else "",
+            "big4_share_of_industry_revenue_%": round(
+                big["rev"] / ind["operating_revenue_$B"] * 100, 1)
+            if ind["operating_revenue_$B"] else "",
+            "big4_share_of_industry_op_profit_%": round(
+                big["op"] / ind_op * 100, 1) if ind_op else "",
+            "rest_carriers_reporting": (ind["airlines_reporting"]
+                                        - big["carriers"]),
+            "rest_revenue_$B": rest_rev,
+            "rest_op_profit_$B": rest_op,
+            "rest_op_margin_%": round(rest_op / rest_rev * 100, 1)
+            if rest_rev else "",
+            "industry_revenue_$B": ind["operating_revenue_$B"],
+            "industry_op_profit_$B": ind_op,
+            "industry_op_margin_%": ind["op_margin_%"],
         })
     return out
 
@@ -563,6 +631,37 @@ def main():
                         "operating_margin_%"])
             for t, yr, rev, op in big4:
                 w.writerow([t, yr, rev, op, round(op / rev * 100, 1)])
+        # ---- Big 4 vs rest-of-industry split (v7) ----
+        split = build_big4_vs_rest(rows, big4)
+        if split:
+            with open(os.path.join(HERE, "big4_vs_rest.csv"), "w",
+                      newline="") as f:
+                w = csv.DictWriter(f, fieldnames=list(split[0].keys()))
+                w.writeheader()
+                w.writerows(split)
+
+            fig, ax = plt.subplots(figsize=(8.5, 4.2))
+            yrs_s = [str(s["year"]) for s in split]
+            x_s = range(len(yrs_s))
+            ax.bar([i - 0.2 for i in x_s],
+                   [s["big4_op_profit_$B"] for s in split],
+                   width=0.4, color="#1f4e79",
+                   label="Big 4 operating profit (EDGAR)")
+            ax.bar([i + 0.2 for i in x_s],
+                   [s["rest_op_profit_$B"] for s in split],
+                   width=0.4, color="#b00020",
+                   label="Rest of industry, implied (BTS - Big 4)")
+            ax.axhline(0, color="#555555", linewidth=0.8)
+            ax.set_xticks(list(x_s))
+            ax.set_xticklabels(yrs_s)
+            ax.set_ylabel("$B")
+            ax.set_title("U.S. airlines: operating profit, Big 4 vs rest\n"
+                         "of industry (BTS industry total minus EDGAR Big 4)")
+            ax.legend(fontsize=8)
+            fig.tight_layout()
+            fig.savefig(os.path.join(HERE, "big4_vs_rest.png"), dpi=120)
+            plt.close(fig)
+
         print()
         print("Big 4 operating margins (SEC EDGAR 10-K facts):")
         for yr in (2023, 2024, 2025):
@@ -573,14 +672,27 @@ def main():
                 per = ", ".join(f"{b[0]} {b[3]/b[2]*100:.1f}%" for b in sel)
                 print(f"  {yr}: combined {tot_op/tot_rev*100:.1f}% "
                       f"(${tot_op:.2f}B on ${tot_rev:.1f}B) -- {per}")
+        if split:
+            print()
+            print("Big 4 vs rest of industry (rest is implied residual):")
+            for s in split:
+                print(f"  {s['year']}: Big 4 took "
+                      f"{s['big4_share_of_industry_revenue_%']:.1f}% of "
+                      f"revenue but "
+                      f"{s['big4_share_of_industry_op_profit_%']:.1f}% of "
+                      f"operating profit; the other "
+                      f"{s['rest_carriers_reporting']} carriers combined "
+                      f"for ${s['rest_op_profit_$B']:.2f}B on "
+                      f"${s['rest_revenue_$B']:.2f}B "
+                      f"({s['rest_op_margin_%']:.1f}% margin).")
     else:
         print()
         print("Big 4 EDGAR pull unavailable this run; BTS results stand alone.")
     print()
     print("Sources: SOURCES.md (results.csv, results.png, fee_mix.csv, "
           "fee_mix.png, sensitivity.csv, sensitivity.png, cumulative.csv, "
-          "cumulative.png, eras.csv, per_airline.csv, per_airline.png "
-          "written).")
+          "cumulative.png, eras.csv, per_airline.csv, per_airline.png, "
+          "big4_vs_rest.csv, big4_vs_rest.png written when EDGAR is up).")
 
 
 if __name__ == "__main__":
