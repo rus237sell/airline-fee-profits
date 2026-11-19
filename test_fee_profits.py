@@ -13,6 +13,7 @@ from fee_profits import (
     build_big4_vs_rest,
     build_cumulative,
     build_eras,
+    build_margin_bridge,
     build_mix,
     build_per_airline,
     build_rows,
@@ -367,6 +368,74 @@ class TestBig4VsRest(unittest.TestCase):
             {s["year"]: s["big4_op_profit_$B"] for s in split
              if s["year"] in self.by_year},
             {y: s["big4_op_profit_$B"] for y, s in self.by_year.items()})
+
+
+class TestMarginBridge(unittest.TestCase):
+    def setUp(self):
+        self.rows = build_rows()
+        self.bridge = build_margin_bridge(self.rows)
+        self.by_year = {b["year"]: b for b in self.bridge}
+
+    def test_shape_matches_rows(self):
+        self.assertEqual(len(self.bridge), len(self.rows))
+        for b, row in zip(self.bridge, self.rows):
+            self.assertEqual(b["year"], row["year"])
+            self.assertEqual(b["op_margin_%"], row["op_margin_%"])
+            self.assertEqual(b["op_margin_ex_fees_%"],
+                             row["op_margin_ex_fees_%"])
+            self.assertEqual(b["fee_margin_%"],
+                             row["fees_share_of_revenue_%"])
+
+    def test_margin_identity_within_rounding(self):
+        # op margin = ex-fee margin + fee margin, up to the 0.1-pt
+        # rounding of the source margins (2020 is off by exactly 0.1).
+        for b in self.bridge:
+            self.assertAlmostEqual(
+                b["op_margin_ex_fees_%"] + b["fee_margin_%"],
+                b["op_margin_%"], delta=0.15)
+
+    def test_2019_changes_are_zero(self):
+        b = self.by_year[2019]
+        self.assertEqual(b["op_margin_change_vs_2019_pts"], 0.0)
+        self.assertEqual(b["ex_fee_margin_change_vs_2019_pts"], 0.0)
+        self.assertEqual(b["fee_margin_change_vs_2019_pts"], 0.0)
+
+    def test_2025_hand_math(self):
+        b = self.by_year[2025]
+        self.assertEqual(b["op_margin_%"], 4.5)
+        self.assertEqual(b["op_margin_ex_fees_%"], 1.1)
+        self.assertEqual(b["fee_margin_%"], 3.4)
+        self.assertEqual(b["op_margin_change_vs_2019_pts"], -6.1)
+        self.assertEqual(b["ex_fee_margin_change_vs_2019_pts"], -5.1)
+        self.assertEqual(b["fee_margin_change_vs_2019_pts"], -1.0)
+
+    def test_component_changes_sum_to_total_change(self):
+        # Exact for the 2019->2025 endpoint; within rounding elsewhere.
+        for b in self.bridge:
+            self.assertAlmostEqual(
+                b["ex_fee_margin_change_vs_2019_pts"]
+                + b["fee_margin_change_vs_2019_pts"],
+                b["op_margin_change_vs_2019_pts"], delta=0.15)
+        b = self.by_year[2025]
+        self.assertEqual(
+            b["ex_fee_margin_change_vs_2019_pts"]
+            + b["fee_margin_change_vs_2019_pts"],
+            b["op_margin_change_vs_2019_pts"])
+
+    def test_ex_fee_supplies_most_of_the_decline(self):
+        b = self.by_year[2025]
+        share = (-b["ex_fee_margin_change_vs_2019_pts"]
+                 / -b["op_margin_change_vs_2019_pts"] * 100)
+        self.assertAlmostEqual(share, 83.6, places=1)
+        self.assertGreater(
+            -b["ex_fee_margin_change_vs_2019_pts"],
+            -b["fee_margin_change_vs_2019_pts"])
+
+    def test_2022_margin_was_entirely_fees(self):
+        b = self.by_year[2022]
+        self.assertEqual(b["op_margin_%"], 3.7)
+        self.assertEqual(b["op_margin_ex_fees_%"], 0.0)
+        self.assertEqual(b["fee_margin_%"], 3.7)
 
 
 if __name__ == "__main__":

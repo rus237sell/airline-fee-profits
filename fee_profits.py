@@ -69,6 +69,19 @@ $0.22B in 2023 and lost money in both 2024 (-$0.53B, -1.1% margin) and
 2025 (-$1.03B, -2.2% margin). The industry profit the fees are compared
 against is, in other words, entirely a Big 4 profit; BTS does not split
 fees by carrier, so the rest's ex-fee result cannot be computed here.
+
+Eighth cut (v8): the margin bridge. Operating margin is exactly the
+ex-fee margin plus fees as a share of revenue, so the margin change
+since 2019 splits into the two parts with nothing left over
+(build_margin_bridge, margin_bridge.csv / margin_bridge.png).
+From 2019 to 2025 the reported margin fell 6.1 points (10.6% to
+4.5%): the ex-fee margin supplied 5.1 points of that fall (6.2% to
+1.1%, 83.6% of the decline) and the fee margin supplied the other
+1.0 point (4.4% to 3.4%), because fees grew more slowly than revenue.
+The margin did not fall mainly because the fee line weakened; it fell
+because the business underneath the fees weakened far more. In 2022
+the bridge is the extreme case: the 3.7% reported margin was 0.0
+points ex fees plus 3.7 points of fees.
 """
 
 import csv
@@ -335,6 +348,37 @@ def build_big4_vs_rest(rows, big4):
     return out
 
 
+def build_margin_bridge(rows):
+    """Margin bridge: operating margin split into its two exact parts.
+
+    Operating margin = ex-fee margin + fees as a share of revenue, by
+    construction (the same revenue denominator), so each year's change
+    vs 2019 in the reported margin is the sum of the change in the
+    ex-fee margin and the change in the fee margin, up to the 0.1-pt
+    rounding of the source margins. This answers a different question
+    from the fee share of profit: not how large fees are next to
+    profit, but how much of the margin *decline* came from the fee
+    line itself vs from the business underneath it.
+    """
+    base = next(r for r in rows if r["year"] == 2019)
+    out = []
+    for r in rows:
+        out.append({
+            "year": r["year"],
+            "op_margin_%": r["op_margin_%"],
+            "op_margin_ex_fees_%": r["op_margin_ex_fees_%"],
+            "fee_margin_%": r["fees_share_of_revenue_%"],
+            "op_margin_change_vs_2019_pts": round(
+                r["op_margin_%"] - base["op_margin_%"], 1),
+            "ex_fee_margin_change_vs_2019_pts": round(
+                r["op_margin_ex_fees_%"] - base["op_margin_ex_fees_%"], 1),
+            "fee_margin_change_vs_2019_pts": round(
+                r["fees_share_of_revenue_%"]
+                - base["fees_share_of_revenue_%"], 1),
+        })
+    return out
+
+
 def majority_threshold_rate(row):
     """Handling-cost rate (%) at which net fees = 50% of operating profit.
 
@@ -506,6 +550,32 @@ def main():
     fig.savefig(os.path.join(HERE, "per_airline.png"), dpi=120)
     plt.close(fig)
 
+    # ---- margin bridge (v8) ----
+    bridge = build_margin_bridge(rows)
+    with open(os.path.join(HERE, "margin_bridge.csv"), "w", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=list(bridge[0].keys()))
+        w.writeheader()
+        w.writerows(bridge)
+
+    fig, ax = plt.subplots(figsize=(8.5, 4.2))
+    yrs_b = [str(b["year"]) for b in bridge]
+    ax.plot(yrs_b, [b["op_margin_%"] for b in bridge],
+            marker="o", color="#1f4e79", label="Operating margin (reported)")
+    ax.plot(yrs_b, [b["op_margin_ex_fees_%"] for b in bridge],
+            marker="o", color="#b00020",
+            label="Ex-fee operating margin (expenses flat)")
+    ax.plot(yrs_b, [b["fee_margin_%"] for b in bridge],
+            marker="o", color="#c9a227",
+            label="Fee margin (fees as % of revenue)")
+    ax.axhline(0, color="#555555", linewidth=0.8)
+    ax.set_ylabel("% of operating revenue")
+    ax.set_title("U.S. airlines: margin bridge -- reported margin is\n"
+                 "ex-fee margin plus the fee margin (BTS)")
+    ax.legend(fontsize=8)
+    fig.tight_layout()
+    fig.savefig(os.path.join(HERE, "margin_bridge.png"), dpi=120)
+    plt.close(fig)
+
     # ---- chart: operating profit vs ex-fee operating profit (profit years) --
     trend = [r for r in rows if r["operating_profit_$B"] > 0]
     yrs = [str(r["year"]) for r in trend]
@@ -617,6 +687,26 @@ def main():
           f"profit rose because ex-fee profit per carrier collapsed, "
           f"not because fees per carrier grew.")
     print()
+    print("Margin bridge (vs 2019, percentage points):")
+    b19 = next(b for b in bridge if b["year"] == 2019)
+    b25 = next(b for b in bridge if b["year"] == 2025)
+    b22 = next(b for b in bridge if b["year"] == 2022)
+    decline = -b25["op_margin_change_vs_2019_pts"]
+    ex_share = (-b25["ex_fee_margin_change_vs_2019_pts"] / decline * 100
+                if decline else 0.0)
+    print(f"  Reported margin {b19['op_margin_%']:.1f}% (2019) -> "
+          f"{b25['op_margin_%']:.1f}% (2025), "
+          f"{b25['op_margin_change_vs_2019_pts']:+.1f} pts: ex-fee margin "
+          f"{b25['ex_fee_margin_change_vs_2019_pts']:+.1f} pts "
+          f"({b19['op_margin_ex_fees_%']:.1f}% -> "
+          f"{b25['op_margin_ex_fees_%']:.1f}%, {ex_share:.1f}% of the "
+          f"decline) plus fee margin "
+          f"{b25['fee_margin_change_vs_2019_pts']:+.1f} pts "
+          f"({b19['fee_margin_%']:.1f}% -> {b25['fee_margin_%']:.1f}%).")
+    print(f"  2022: the {b22['op_margin_%']:.1f}% reported margin was "
+          f"{b22['op_margin_ex_fees_%']:.1f} pts ex fees plus "
+          f"{b22['fee_margin_%']:.1f} pts of fees.")
+    print()
     print("Caveats: fee counterfactual holds expenses flat (upper bound);")
     print("the sensitivity relaxes that for baggage handling only --")
     print("seat/food/other ancillary revenue is NOT in the BTS fee lines,")
@@ -692,6 +782,7 @@ def main():
     print("Sources: SOURCES.md (results.csv, results.png, fee_mix.csv, "
           "fee_mix.png, sensitivity.csv, sensitivity.png, cumulative.csv, "
           "cumulative.png, eras.csv, per_airline.csv, per_airline.png, "
+          "margin_bridge.csv, margin_bridge.png, "
           "big4_vs_rest.csv, big4_vs_rest.png written when EDGAR is up).")
 
 
